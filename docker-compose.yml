@@ -30,7 +30,7 @@ services:
   producer:
     build:
       context: .
-      dockerfile: src/producer/Dockerfile
+      dockerfile: src/producer/dockerfile
     image: sample.dotnet.kafka.producer:latest
     links: 
      - kafka
@@ -39,7 +39,7 @@ services:
   consumer:
     build: 
       context: .
-      dockerfile: src/consumer/Dockerfile
+      dockerfile: src/consumer/dockerfile
     image: sample.dotnet.kafka.consumer:latest
     links: 
      - kafka
