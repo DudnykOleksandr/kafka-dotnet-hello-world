@@ -1,4 +1,4 @@
-version: '3'
+version: '3.6'
 services:
   zookeeper:
     image: wurstmeister/zookeeper
@@ -29,8 +29,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
   producer:
     build:
-      context: ./src/.
-      dockerfile: producer/dockerfile
+      context: .
+      dockerfile: src/producer/Dockerfile
     image: sample.dotnet.kafka.producer:latest
     links: 
      - kafka
@@ -38,8 +38,8 @@ services:
       ASPNETCORE_ENVIRONMENT: docker
   consumer:
     build: 
-      context: ./src/.
-      dockerfile: consumer/dockerfile
+      context: .
+      dockerfile: src/consumer/Dockerfile
     image: sample.dotnet.kafka.consumer:latest
     links: 
      - kafka

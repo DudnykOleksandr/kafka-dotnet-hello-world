@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" Sdk="Microsoft.Docker.Sdk">
+  <PropertyGroup Label="Globals">
+    <ProjectVersion>2.1</ProjectVersion>
+    <DockerTargetOS>Linux</DockerTargetOS>
+    <ProjectGuid>6ff489e6-e953-4d8d-b260-62122f4438f9</ProjectGuid>
+    <DockerLaunchAction>LaunchBrowser</DockerLaunchAction>
+    <DockerServiceUrl>
+    </DockerServiceUrl>
+    <DockerServiceName>api</DockerServiceName>
+    <AdditionalComposeFilePaths>
+    </AdditionalComposeFilePaths>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include=".dockerignore" />
+    <None Include="docker-compose.yml" />
+  </ItemGroup>
+</Project>

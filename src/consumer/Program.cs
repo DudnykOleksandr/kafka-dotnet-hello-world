@@ -1,59 +1,122 @@
-﻿using Shared;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
-using System.Threading.Tasks;
+using System.Linq;
+using System.Threading;
 using Confluent.Kafka;
-using Confluent.Kafka.Serialization;
-using Microsoft.Extensions.Configuration;
+using Shared;
 
 namespace Consumer
 {
-    class Program
+     public class Program
     {
-        
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {
-            var typeName = typeof(Program).Assembly.GetName();
-            Console.WriteLine($"Starting {typeName.Name} v{typeName.Version}...");
+            Console.WriteLine($"Started consumer, Ctrl-C to stop consuming");
 
-            // Create the consumer configuration
-            var config = new Dictionary<string, object>
-            {
-                { "group.id", Common.GetConfigValue("group.id") },
-                { "bootstrap.servers", Common.GetConfigValue("bootstrap.servers") },
-                { "auto.commit.interval.ms", Common.GetConfigValue("auto.commit.interval.ms") },
-                { "auto.offset.reset", Common.GetConfigValue("auto.offset.reset") }
+            CancellationTokenSource cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) => {
+                e.Cancel = true; // prevent the process from terminating.
+                cts.Cancel();
             };
 
-            Console.WriteLine($"Connecting consumer to '{Common.GetConfigValue("bootstrap.servers")}' kafka endpoint...");
-            // Create the consumer
-            using (var consumer = new Consumer<Null, string>(config, null, new StringDeserializer(Encoding.UTF8)))
+            Run_Consume(cts.Token);
+        }
+
+        /// <summary>
+        ///     In this example
+        ///         - offsets are manually committed.
+        ///         - no extra thread is created for the Poll (Consume) loop.
+        /// </summary>
+        public static void Run_Consume(CancellationToken cancellationToken)
+        {
+            
+            string brokerList = Common.GetConfigValue("bootstrap.servers");
+            string topicName = Common.GetConfigValue("topic");
+
+            var config = new ConsumerConfig
             {
-                // Subscribe to the OnMessage event
-                consumer.OnMessage += (obj, msg) => 
+                BootstrapServers = brokerList,
+                GroupId = "csharp-consumer",
+                EnableAutoCommit = false,
+                StatisticsIntervalMs = 5000,
+                SessionTimeoutMs = 6000,
+                AutoOffsetReset = AutoOffsetReset.Earliest,
+                EnablePartitionEof = true
+            };
+
+            const int commitPeriod = 5;
+
+            // Note: If a key or value deserializer is not set (as is the case below), the 
+            // deserializer corresponding to the appropriate type from Confluent.Kafka.Deserializers
+            // will be used automatically (where available). The default deserializer for string
+            // is UTF8. The default deserializer for Ignore returns null for all input data
+            // (including non-null data).
+            using (var consumer = new ConsumerBuilder<Ignore, string>(config)
+                // Note: All handlers are called on the main .Consume thread.
+                .SetErrorHandler((_, e) => Console.WriteLine($"Error: {e.Reason}"))
+                .SetStatisticsHandler((_, json) => Console.WriteLine($"Statistics: {json}"))
+                .SetPartitionsAssignedHandler((c, partitions) =>
                 {
-                    Console.WriteLine($"Received: {msg.Value}. Offset: {msg.Offset}. Partition: {msg.Partition}");
-                };
-
-                // Subscribe to the Kafka topic
-                consumer.Subscribe(new List<string>() { Common.GetConfigValue("topic") });
-
-                // Handle Cancel Keypress 
-                var cancelled = false;
-                Console.CancelKeyPress += (_, e) =>
+                    Console.WriteLine($"Assigned partitions: [{string.Join(", ", partitions)}]");
+                    // possibly manually specify start offsets or override the partition assignment provided by
+                    // the consumer group by returning a list of topic/partition/offsets to assign to, e.g.:
+                    // 
+                    // return partitions.Select(tp => new TopicPartitionOffset(tp, externalOffsets[tp]));
+                })
+                .SetPartitionsRevokedHandler((c, partitions) =>
                 {
-                    e.Cancel = true; // prevent the process from terminating.
-                    cancelled = true;
-                };
+                    Console.WriteLine($"Revoking assignment: [{string.Join(", ", partitions)}]");
+                })
+                .Build())
+            {
+                consumer.Subscribe(new List<string>() { topicName });
 
-                Console.WriteLine("Ctrl-C to exit.");
-
-                // Poll for messages
-                while (!cancelled)
+                try
                 {
-                    consumer.Poll(TimeSpan.FromMilliseconds(100));
+                    while (true)
+                    {
+                        try
+                        {
+                            var consumeResult = consumer.Consume(cancellationToken);
+
+                            if (consumeResult.IsPartitionEOF)
+                            {
+                                Console.WriteLine(
+                                    $"Reached end of topic {consumeResult.Topic}, partition {consumeResult.Partition}, offset {consumeResult.Offset}.");
+
+                                continue;
+                            }
+
+                            Console.WriteLine($"Received message at {consumeResult.TopicPartitionOffset}: {consumeResult.Message.Value}");
+
+                            if (consumeResult.Offset % commitPeriod == 0)
+                            {
+                                // The Commit method sends a "commit offsets" request to the Kafka
+                                // cluster and synchronously waits for the response. This is very
+                                // slow compared to the rate at which the consumer is capable of
+                                // consuming messages. A high performance application will typically
+                                // commit offsets relatively infrequently and be designed handle
+                                // duplicate messages in the event of failure.
+                                try
+                                {
+                                    consumer.Commit(consumeResult);
+                                }
+                                catch (KafkaException e)
+                                {
+                                    Console.WriteLine($"Commit error: {e.Error.Reason}");
+                                }
+                            }
+                        }
+                        catch (ConsumeException e)
+                        {
+                            Console.WriteLine($"Consume error: {e.Error.Reason}");
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    Console.WriteLine("Closing consumer.");
+                    consumer.Close();
                 }
             }
         }
